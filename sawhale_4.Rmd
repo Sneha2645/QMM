@@ -1,0 +1,180 @@
+---
+title: "sawhale_#4"
+author: "Sneha"
+date: "2025-09-26"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# 1. Install Package
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(lpSolve)
+```
+
+# 2. Parameters
+
+```{r}
+plant_capacities <- c(750, 900, 450)
+
+# Storage limits per plant (sq ft)
+storage_limits <- c(13000, 12000, 5000)
+
+# Space required per unit of each size (Large, Medium, Small)
+space_per_unit <- c(20, 15, 12)
+
+# Sales demand for each size
+sales_demand <- c(900, 1200, 750)
+
+# Profit per unit of each size
+profit_per_unit <- c(420, 360, 300)
+
+num_plants <- 3
+num_sizes  <- 3
+total_vars <- num_plants * num_sizes + 1  # 9 production vars + 1 alpha
+```
+
+# 3.Objective Function 
+
+```{r}
+# Maximize total profit
+objective <- c(rep(profit_per_unit, num_plants), 0)  # 0 profit for alpha
+```
+
+# 4. Constraints
+```{r}
+
+constraints_matrix <- NULL
+constraints_dir    <- c()
+constraints_rhs    <- c()
+
+# 4a. Capacity fraction constraint (same alpha for all plants)
+for (i in 1:num_plants) {
+  # sum(production) - capacity*alpha <= 0
+  row1 <- rep(0, total_vars)
+  row1[(i-1)*num_sizes + 1:num_sizes] <- 1
+  row1[total_vars] <- -plant_capacities[i]
+  constraints_matrix <- rbind(constraints_matrix, row1)
+  constraints_dir <- c(constraints_dir, "<=")
+  constraints_rhs <- c(constraints_rhs, 0)
+  
+  # -sum(production) + capacity*alpha <= 0
+  row2 <- rep(0, total_vars)
+  row2[(i-1)*num_sizes + 1:num_sizes] <- -1
+  row2[total_vars] <- plant_capacities[i]
+  constraints_matrix <- rbind(constraints_matrix, row2)
+  constraints_dir <- c(constraints_dir, "<=")
+  constraints_rhs <- c(constraints_rhs, 0)
+}
+
+# 4b. Storage constraints
+for (i in 1:num_plants) {
+  row <- rep(0, total_vars)
+  row[(i-1)*num_sizes + 1:num_sizes] <- space_per_unit
+  constraints_matrix <- rbind(constraints_matrix, row)
+  constraints_dir <- c(constraints_dir, "<=")
+  constraints_rhs <- c(constraints_rhs, storage_limits[i])
+}
+
+# 4c. Demand constraints
+for (j in 1:num_sizes) {
+  row <- rep(0, total_vars)
+  row[j] <- 1
+  row[j + num_sizes] <- 1
+  row[j + 2*num_sizes] <- 1
+  constraints_matrix <- rbind(constraints_matrix, row)
+  constraints_dir <- c(constraints_dir, "<=")
+  constraints_rhs <- c(constraints_rhs, sales_demand[j])
+}
+
+# 4d. Alpha bounds
+# alpha <= 1
+row <- rep(0, total_vars); row[total_vars] <- 1
+constraints_matrix <- rbind(constraints_matrix, row)
+constraints_dir <- c(constraints_dir, "<=")
+constraints_rhs <- c(constraints_rhs, 1)
+
+# alpha >= 0
+row <- rep(0, total_vars); row[total_vars] <- 1
+constraints_matrix <- rbind(constraints_matrix, row)
+constraints_dir <- c(constraints_dir, ">=")
+constraints_rhs <- c(constraints_rhs, 0)
+```
+
+# 5. Solve the LP Problem
+
+```{r}
+lp_solution <- lp(
+  direction = "max",
+  objective.in = objective,
+  const.mat = constraints_matrix,
+  const.dir = constraints_dir,
+  const.rhs = constraints_rhs
+)
+
+# Check status
+cat("LP Status (0 = optimal solution found):", lp_solution$status, "\n")
+cat("Maximum Profit: $", lp_solution$objval, "\n\n")
+```
+# 6. Solution Interpretation
+
+```{r}
+# Name variables for clarity
+var_names <- c(
+  paste0("Plant1_", c("L","M","S")),
+  paste0("Plant2_", c("L","M","S")),
+  paste0("Plant3_", c("L","M","S")),
+  "Alpha"
+)
+solution <- lp_solution$solution
+names(solution) <- var_names
+
+# Print production per plant and alpha
+solution
+
+```
+
+# 7. Summaries
+
+```{r}
+# Plant-wise summary
+for (i in 1:num_plants) {
+  idx <- (i-1)*num_sizes + 1:num_sizes
+  cat(sprintf("\nPlant %d Summary:", i))
+  cat("\n  Total Units Produced:", sum(solution[idx]))
+  cat("\n  Capacity Fraction Used:", round(sum(solution[idx])/plant_capacities[i], 2))
+  cat("\n  Storage Used:", sum(solution[idx]*space_per_unit), "of", storage_limits[i], "\n")
+}
+
+# Total units by size
+cat("\nTotal Units by Size (L, M, S):",
+    sum(solution[c(1,4,7)]),
+    sum(solution[c(2,5,8)]),
+    sum(solution[c(3,6,9)]), "\n")
+```
